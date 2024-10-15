@@ -1,9 +1,12 @@
+pip install Flask
+from flask import Flask, render_template, request
 import random
 import jpholiday
 import calendar
-from datetime import datetime, timedelta
+from datetime import datetime
 
-# 労働者のクラス
+app = Flask(__name__)
+
 class Worker:
     def __init__(self, name, available_days):
         self.name = name
@@ -17,7 +20,6 @@ def generate_working_days(year, month):
     
     for day in range(1, num_days + 1):
         date = datetime(year, month, day)
-        # 休日（土日、祝日）を除外
         if date.weekday() < 5 and not jpholiday.is_holiday(date):  # 平日かつ祝日でない
             working_days.append(date)
     return working_days
@@ -25,52 +27,113 @@ def generate_working_days(year, month):
 # シフト割り当て関数
 def assign_shifts(workers, working_days, hours_per_day=8):
     shifts = {day: None for day in working_days}
-    daily_workers = len(working_days) * hours_per_day / len(workers)
     
     for day in working_days:
         available_workers = [worker for worker in workers if day in worker.available_days]
         
-        # 勤務可能者からランダムに選ぶ
         if available_workers:
             worker = random.choice(available_workers)
             shifts[day] = worker.name
-            worker.total_hours += hours_per_day  # 1日8時間勤務
+            worker.total_hours += hours_per_day
 
     return shifts
 
-# 労働者のシフトと合計勤務時間表示
-def print_worker_info(workers):
-    print("\n--- 勤務者情報 ---")
-    for worker in workers:
-        print(f"名前: {worker.name}, 合計勤務時間: {worker.total_hours}時間")
+@app.route("/", methods=["GET", "POST"])
+def index():
+    if request.method == "POST":
+        year = int(request.form["year"])
+        month = int(request.form["month"])
+        names = request.form.getlist("name[]")
+        available_days = request.form.getlist("available_days[]")
+        
+        workers = []
+        
+        for name, days in zip(names, available_days):
+            days_set = set(datetime.strptime(day.strip(), "%Y-%m-%d") for day in days.split(","))
+            workers.append(Worker(name, days_set))
+        
+        working_days = generate_working_days(year, month)
+        shifts = assign_shifts(workers, working_days)
 
-def print_shifts(shifts):
-    print("\n--- シフト表 ---")
-    for day, worker_name in shifts.items():
-        print(f"{day.strftime('%Y-%m-%d')} - {worker_name if worker_name else 'シフトなし'}")
+        return render_template("result.html", shifts=shifts, workers=workers)
 
-# メインロジック
-def main():
-    # 年月の指定
-    year = 2024
-    month = 10  # 例：10月
-    
-    # 労働者の名前と勤務可能日を入力
-    workers = [
-        Worker("田中", {datetime(2024, 10, 2), datetime(2024, 10, 3), datetime(2024, 10, 4)}),
-        Worker("佐藤", {datetime(2024, 10, 3), datetime(2024, 10, 4), datetime(2024, 10, 5)}),
-        Worker("鈴木", {datetime(2024, 10, 4), datetime(2024, 10, 6), datetime(2024, 10, 7)}),
-    ]
-    
-    # 日本のカレンダーで稼働日を生成
-    working_days = generate_working_days(year, month)
-    
-    # シフトを割り当てる
-    shifts = assign_shifts(workers, working_days)
-    
-    # 結果を表示
-    print_shifts(shifts)
-    print_worker_info(workers)
+    return render_template("index.html")
 
 if __name__ == "__main__":
-    main()
+    app.run(debug=True)
+<!DOCTYPE html>
+<html lang="ja">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>シフト作成ツール</title>
+</head>
+<body>
+    <h1>シフト作成ツール</h1>
+    <form method="post">
+        <label for="year">年:</label>
+        <input type="number" name="year" value="2024" required><br>
+
+        <label for="month">月:</label>
+        <input type="number" name="month" value="10" required><br>
+
+        <div id="workers">
+            <div>
+                <label for="name[]">名前:</label>
+                <input type="text" name="name[]" required><br>
+                <label for="available_days[]">勤務可能日(カンマ区切り,例:2024-10-02,2024-10-03):</label>
+                <input type="text" name="available_days[]" required><br>
+            </div>
+        </div>
+
+        <button type="button" onclick="addWorker()">労働者を追加</button><br>
+        <button type="submit">シフトを生成</button>
+    </form>
+
+    <script>
+        function addWorker() {
+            const workerDiv = document.createElement("div");
+            workerDiv.innerHTML = `
+                <label for="name[]">名前:</label>
+                <input type="text" name="name[]" required><br>
+                <label for="available_days[]">勤務可能日(カンマ区切り,例:2024-10-02,2024-10-03):</label>
+                <input type="text" name="available_days[]" required><br>
+            `;
+            document.getElementById("workers").appendChild(workerDiv);
+        }
+    </script>
+</body>
+</html>
+<!DOCTYPE html>
+<html lang="ja">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>シフト結果</title>
+</head>
+<body>
+    <h1>シフト結果</h1>
+
+    <table border="1">
+        <tr>
+            <th>日付</th>
+            <th>担当者</th>
+        </tr>
+        {% for day, worker in shifts.items() %}
+        <tr>
+            <td>{{ day.strftime('%Y-%m-%d') }}</td>
+            <td>{{ worker if worker else "シフトなし" }}</td>
+        </tr>
+        {% endfor %}
+    </table>
+
+    <h2>各労働者の合計勤務時間</h2>
+    <ul>
+        {% for worker in workers %}
+        <li>{{ worker.name }}: {{ worker.total_hours }} 時間</li>
+        {% endfor %}
+    </ul>
+
+    <a href="/">戻る</a>
+</body>
+</html>
