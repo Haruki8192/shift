@@ -1,139 +1,152 @@
-pip install Flask
-from flask import Flask, render_template, request
-import random
-import jpholiday
-import calendar
-from datetime import datetime
-
-app = Flask(__name__)
-
-class Worker:
-    def __init__(self, name, available_days):
-        self.name = name
-        self.available_days = available_days
-        self.total_hours = 0
-
-# 日本のカレンダーに基づく稼働日生成
-def generate_working_days(year, month):
-    num_days = calendar.monthrange(year, month)[1]  # 月の日数
-    working_days = []
-    
-    for day in range(1, num_days + 1):
-        date = datetime(year, month, day)
-        if date.weekday() < 5 and not jpholiday.is_holiday(date):  # 平日かつ祝日でない
-            working_days.append(date)
-    return working_days
-
-# シフト割り当て関数
-def assign_shifts(workers, working_days, hours_per_day=8):
-    shifts = {day: None for day in working_days}
-    
-    for day in working_days:
-        available_workers = [worker for worker in workers if day in worker.available_days]
-        
-        if available_workers:
-            worker = random.choice(available_workers)
-            shifts[day] = worker.name
-            worker.total_hours += hours_per_day
-
-    return shifts
-
-@app.route("/", methods=["GET", "POST"])
-def index():
-    if request.method == "POST":
-        year = int(request.form["year"])
-        month = int(request.form["month"])
-        names = request.form.getlist("name[]")
-        available_days = request.form.getlist("available_days[]")
-        
-        workers = []
-        
-        for name, days in zip(names, available_days):
-            days_set = set(datetime.strptime(day.strip(), "%Y-%m-%d") for day in days.split(","))
-            workers.append(Worker(name, days_set))
-        
-        working_days = generate_working_days(year, month)
-        shifts = assign_shifts(workers, working_days)
-
-        return render_template("result.html", shifts=shifts, workers=workers)
-
-    return render_template("index.html")
-
-if __name__ == "__main__":
-    app.run(debug=True)
 <!DOCTYPE html>
 <html lang="ja">
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>シフト作成ツール</title>
+    <title>シフト作成ホームページ</title>
+    <style>
+        body {
+            font-family: Arial, sans-serif;
+            background-color: #f4f4f4;
+            margin: 0;
+            padding: 0;
+        }
+        header {
+            background-color: #4CAF50;
+            color: white;
+            padding: 10px 0;
+            text-align: center;
+        }
+        main {
+            margin: 20px auto;
+            max-width: 800px;
+            padding: 20px;
+            background-color: white;
+            box-shadow: 0 0 10px rgba(0, 0, 0, 0.1);
+        }
+        h1 {
+            text-align: center;
+        }
+        form {
+            margin-bottom: 20px;
+        }
+        label {
+            display: block;
+            margin: 10px 0 5px;
+        }
+        input[type="text"], input[type="number"], textarea {
+            width: 100%;
+            padding: 10px;
+            margin-bottom: 10px;
+            border: 1px solid #ccc;
+            border-radius: 4px;
+        }
+        button {
+            display: block;
+            width: 100%;
+            padding: 10px;
+            background-color: #4CAF50;
+            color: white;
+            border: none;
+            border-radius: 4px;
+            cursor: pointer;
+        }
+        button:hover {
+            background-color: #45a049;
+        }
+        .result {
+            background-color: #f9f9f9;
+            padding: 15px;
+            margin-top: 20px;
+            border: 1px solid #ccc;
+            border-radius: 4px;
+        }
+    </style>
 </head>
 <body>
+
+<header>
     <h1>シフト作成ツール</h1>
-    <form method="post">
+</header>
+
+<main>
+    <h2>シフトを組む</h2>
+    <form id="shiftForm">
         <label for="year">年:</label>
-        <input type="number" name="year" value="2024" required><br>
+        <input type="number" id="year" name="year" value="2024" required>
 
         <label for="month">月:</label>
-        <input type="number" name="month" value="10" required><br>
+        <input type="number" id="month" name="month" value="10" required>
 
         <div id="workers">
-            <div>
-                <label for="name[]">名前:</label>
-                <input type="text" name="name[]" required><br>
-                <label for="available_days[]">勤務可能日(カンマ区切り,例:2024-10-02,2024-10-03):</label>
-                <input type="text" name="available_days[]" required><br>
-            </div>
+            <label for="name1">名前:</label>
+            <input type="text" id="name1" name="name1" placeholder="労働者の名前を入力" required>
+
+            <label for="days1">勤務可能日 (カンマ区切り, 例: 2024-10-02, 2024-10-03):</label>
+            <input type="text" id="days1" name="days1" required>
         </div>
 
-        <button type="button" onclick="addWorker()">労働者を追加</button><br>
+        <button type="button" onclick="addWorker()">労働者を追加</button>
         <button type="submit">シフトを生成</button>
     </form>
 
-    <script>
-        function addWorker() {
-            const workerDiv = document.createElement("div");
-            workerDiv.innerHTML = `
-                <label for="name[]">名前:</label>
-                <input type="text" name="name[]" required><br>
-                <label for="available_days[]">勤務可能日(カンマ区切り,例:2024-10-02,2024-10-03):</label>
-                <input type="text" name="available_days[]" required><br>
-            `;
-            document.getElementById("workers").appendChild(workerDiv);
+    <div class="result" id="shiftResult"></div>
+</main>
+
+<script>
+    let workerCount = 1;
+
+    function addWorker() {
+        workerCount++;
+        const workersDiv = document.getElementById('workers');
+        
+        const newWorkerDiv = document.createElement('div');
+        newWorkerDiv.innerHTML = `
+            <label for="name${workerCount}">名前:</label>
+            <input type="text" id="name${workerCount}" name="name${workerCount}" placeholder="労働者の名前を入力" required>
+
+            <label for="days${workerCount}">勤務可能日 (カンマ区切り, 例: 2024-10-02, 2024-10-03):</label>
+            <input type="text" id="days${workerCount}" name="days${workerCount}" required>
+        `;
+        workersDiv.appendChild(newWorkerDiv);
+    }
+
+    document.getElementById('shiftForm').addEventListener('submit', function(event) {
+        event.preventDefault();
+
+        const year = document.getElementById('year').value;
+        const month = document.getElementById('month').value;
+        const workers = [];
+
+        for (let i = 1; i <= workerCount; i++) {
+            const name = document.getElementById(`name${i}`).value;
+            const days = document.getElementById(`days${i}`).value.split(',').map(day => day.trim());
+            workers.push({ name, days });
         }
-    </script>
-</body>
-</html>
-<!DOCTYPE html>
-<html lang="ja">
-<head>
-    <meta charset="UTF-8">
-    <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>シフト結果</title>
-</head>
-<body>
-    <h1>シフト結果</h1>
 
-    <table border="1">
-        <tr>
-            <th>日付</th>
-            <th>担当者</th>
-        </tr>
-        {% for day, worker in shifts.items() %}
-        <tr>
-            <td>{{ day.strftime('%Y-%m-%d') }}</td>
-            <td>{{ worker if worker else "シフトなし" }}</td>
-        </tr>
-        {% endfor %}
-    </table>
+        const resultDiv = document.getElementById('shiftResult');
+        resultDiv.innerHTML = generateShifts(year, month, workers);
+    });
 
-    <h2>各労働者の合計勤務時間</h2>
-    <ul>
-        {% for worker in workers %}
-        <li>{{ worker.name }}: {{ worker.total_hours }} 時間</li>
-        {% endfor %}
-    </ul>
+    function generateShifts(year, month, workers) {
+        const shifts = [];
+        const daysInMonth = new Date(year, month, 0).getDate(); // 月の日数を取得
 
-    <a href="/">戻る</a>
+        for (let day = 1; day <= daysInMonth; day++) {
+            const date = `${year}-${String(month).padStart(2, '0')}-${String(day).padStart(2, '0')}`;
+            const availableWorkers = workers.filter(worker => worker.days.includes(date));
+
+            if (availableWorkers.length > 0) {
+                const randomWorker = availableWorkers[Math.floor(Math.random() * availableWorkers.length)];
+                shifts.push(`${date}: ${randomWorker.name}`);
+            } else {
+                shifts.push(`${date}: シフトなし`);
+            }
+        }
+
+        return `<h3>シフト結果</h3><ul><li>${shifts.join('</li><li>')}</li></ul>`;
+    }
+</script>
+
 </body>
 </html>
